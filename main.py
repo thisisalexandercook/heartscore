@@ -1,6 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+from PIL import Image
+import os
+import re
+import imageio
 
 
 
@@ -46,15 +50,22 @@ def generateData(HRV_lower_bound, HRV_upper_bound, WHR_lower_bound, WHR_upper_bo
     bounds = [(HRV_lower_bound, HRV_upper_bound), (WHR_lower_bound, WHR_upper_bound)]
 
 
-    c1 = np.array([np.random.randint(low, high) for low, high in bounds])
+    centroid_grabber = ScreeSim(HRV_lower_bound, HRV_upper_bound, WHR_lower_bound, WHR_upper_bound, xMain)
+    print("CENTROID GRABBER")
+    print(centroid_grabber)
+
+    # c1 = np.array([np.random.randint(low, high) for low, high in bounds])
+    c1 = centroid_grabber[0]
     c1 = c1.reshape(1,2)
-    c2 = np.array([np.random.randint(low, high) for low, high in bounds])
+    # c2 = np.array([np.random.randint(low, high) for low, high in bounds])
+    c2 = centroid_grabber[1]
     c2 = c2.reshape(1,2)
-    c3 = np.array([np.random.randint(low, high) for low, high in bounds])
+    # c3 = np.array([np.random.randint(low, high) for low, high in bounds])
+    c3 = centroid_grabber[2]
     c3 = c3.reshape(1,2)
     cMain = np.concatenate((c1, c2, c3), axis=0)
 
-    return xMain, cMain, xA, xB, xC, c1, c2, c3, dataLabel
+    return xMain, cMain, xA, xB, xC, c1, c2, c3, dataLabel,
 
 
 def plotData(c1, c2, c3, xMain, dataLabel,plot_title):
@@ -231,16 +242,106 @@ def sortBySlope(c1, c2, c3):
             sortedSlps[1] = slpsAndCs[i]
     return sortedSlps
 
+def ScreeSim(HRV_lower_bound, HRV_upper_bound, WHR_lower_bound, WHR_upper_bound, xMain):
+
+    bounds = [(HRV_lower_bound, HRV_upper_bound), (WHR_lower_bound, WHR_upper_bound)]
+
+    iterations = 10
+    k_range = 10
+    k_intra_values = np.zeros(k_range)
+    centroid_holder = np.zeros((iterations, 3, 2))
+
+    for k in range(1,k_range + 1):
+
+        intra_arr = np.zeros(iterations)
+        for counter in range(iterations):
+
+            centroids = np.zeros((k, 2))
+            centroids_difference = np.zeros(len(centroids))
+            centroids_difference.fill(10)
+            for i in range(k):
+                centroids[i] = np.array([np.random.randint(low, high) for low, high in bounds])
+
+            if k == 3:
+                centroid_holder[counter] = centroids
+
+            previous_centroids = centroids
+            while np.any(centroids_difference > 0.1):
+
+                distance = np.zeros((k, len(xMain)))
+                for x in range(k):
+                    distance[x] = ScreeDistance(centroids[x], xMain)
+                data_labels = np.argmin(distance, axis=0)
+                centroids = ScreeUpdateCentroid(xMain, centroids, data_labels)
+
+                centroids_difference = np.linalg.norm(previous_centroids - centroids)
+
+            intra_arr[counter] = ScreeIntra(xMain, centroids, data_labels)
+
+        k_intra_values[k-1] = np.min(intra_arr)
+        k_intra_index = np.argmin(intra_arr)
+
+    print("AVERAGE INTRA-CLUSTER VALUES FOR K = 1-10")
+    print(k_intra_values)
+    ScreePlot(k_intra_values, k_range)
+
+    return centroid_holder[k_intra_index]
+
+
+def ScreePlot(k_intra_values, cluster_count):
+
+    plt.plot(np.arange(1, cluster_count+1), k_intra_values, color='black')
+    plt.scatter(np.arange(1, cluster_count+1), k_intra_values, color='black')
+    plt.xticks(np.arange(1, 11))
+
+    plt.title('Athlete Scree Plot')
+    plt.xlabel('Cluster Count - K')
+    plt.ylabel('Objective value - Intra Distance')
+
+    plt.show()
+
+
+def ScreeUpdateCentroid(xMain, centroids, data_labels):
+
+    new_centroids = centroids
+
+    for x in range(len(centroids)):
+        selected_points = xMain[data_labels == x]
+        new_centroids[x] = np.mean(selected_points, axis=0)
+
+    return new_centroids
+
+
+def ScreeIntra(xMain, centroids, data_labels):
+
+    avg_distance = 0
+
+    for x in range(len(xMain)):
+        avg_distance += np.linalg.norm(xMain[x] - centroids[data_labels[x]])
+
+    avg_distance /= len(xMain)
+
+    return avg_distance
+
+
+def ScreeDistance(centroid, xMain):
+
+    distance = np.zeros(len(xMain))
+
+    for x in range(len(xMain)):
+        distance[x] = np.linalg.norm(xMain[x] - centroid)
+
+    return distance
+
 
 def RunSimulation(HRV_lower_bound, HRV_upper_bound, WHR_lower_bound, WHR_upper_bound, plot_title, mean, range_, w_mean, w_range_):
 
-    xMain, cMain, xA, xB, xC, c1, c2, c3, dataLabel = generateData(HRV_lower_bound, HRV_upper_bound, WHR_lower_bound, WHR_upper_bound, mean, range_, w_mean, w_range_)
+    xMain, cMain, xA, xB, xC, c1, c2, c3, dataLabel, = generateData(HRV_lower_bound, HRV_upper_bound, WHR_lower_bound, WHR_upper_bound, mean, range_, w_mean, w_range_)
     InitialplotData(c1, c2, c3, xMain, dataLabel,plot_title)
     plotData(c1, c2, c3, xMain, dataLabel,plot_title)
     centroidDifferenceC1 = 100
     centroidDifferenceC2 = 100
     centroidDifferenceC3 = 100
-
 
     while centroidDifferenceC1 > 0.1 and centroidDifferenceC2 > 0.1 and centroidDifferenceC3 > 0.1:
 
@@ -371,6 +472,94 @@ def AddData(c1, c2, c3, dataLabel, xMain,plot_title):
             print("Please enter a valid response")
 
 
+def IntraCluster(c1, c2, c3, dataLabel, xMain):
+
+    if dataLabel[0] == 1:
+        dataDistance = np.array(math.sqrt((xMain[0, 0] - c1[0, 0]) ** 2 + (xMain[0, 1] - c1[0, 1]) ** 2))
+    elif dataLabel[0] == 2:
+        dataDistance = np.array(math.sqrt((xMain[0, 0] - c2[0, 0]) ** 2 + (xMain[0, 1] - c2[0, 1]) ** 2))
+    elif dataLabel[0] == 3:
+        dataDistance = np.array(math.sqrt((xMain[0, 0] - c3[0, 0]) ** 2 + (xMain[0, 1] - c3[0, 1]) ** 2))
+
+
+
+## DIAGRAM UTILS BELOW
+
+def PhotoGrid(rows,columns,dir,size_x,size_y):
+
+    path = dir
+
+    images = [i for i in os.listdir(path) if i.endswith('.png')]
+    images.sort(key=sort_key)
+    print(images)
+
+    grid_size = (rows, columns)  # Changed to 4x3
+
+    img_list = [Image.open(os.path.join(path, i)).resize((size_x, size_y)) for i in images]  # Change the size as needed
+    grid_img = Image.new('RGB', (size_x * grid_size[0], size_y * grid_size[1]))
+
+    for i in range(grid_size[1]):
+        for j in range(grid_size[0]):
+            grid_img.paste(img_list[i * grid_size[0] + j], (j * size_x, i * size_y))
+
+    grid_img.save(os.path.join(path, "grid_image.png"))
+
+def sort_key(s):
+    return int(re.match(r'A(\d+).png', s).group(1))
+
+
+def DistanceDiagram():
+    data_points = np.array([[40, 52], [59, 53], [63, 63], [62, 49]])
+    colors = ['blue', 'green', 'red', 'black']
+    labels = ['centroid 1', 'centroid 2', 'centroid 3', 'data point']
+    alphas = [1, 1, 1, 0.25]
+    sizes = [150, 150, 150, 100]
+    offset = 0.5
+
+    for i in range(4):
+        plt.scatter(data_points[i, 0], data_points[i, 1], c=colors[i], s=sizes[i], alpha=alphas[i])
+        plt.text(data_points[i, 0] + offset, data_points[i, 1], labels[i])
+
+    for i in range(3):
+        plt.plot([data_points[i, 0], data_points[3, 0]], [data_points[i, 1], data_points[3, 1]], color=colors[i])
+
+    for i in range(3):
+        distance = np.linalg.norm(data_points[3] - data_points[i])
+        plt.text((data_points[i, 0] + data_points[3, 0]) / 2,
+                 (data_points[i, 1] + data_points[3, 1]) / 2,
+                 f'{distance:.2f}',
+                 fontsize=9,
+                 ha='right')
+
+    plt.xlabel('Heart Rate Variability (ms)')
+    plt.ylabel('Waking Heart Rate (bpm)')
+    plt.title("K-means distance measurement")
+    plt.axis('square')
+    plt.show()
+
+def CreateGif(dir):
+
+
+    input_dir = dir
+    output_gif = "output.gif"
+    files = os.listdir(input_dir)
+
+    png_files = [i for i in files if i.endswith('.png')]
+
+    png_files.sort(key=sort_key)
+
+    with imageio.get_writer(output_gif, mode='I') as writer:
+        for filename in png_files:
+            image = imageio.imread(os.path.join(input_dir, filename))
+            writer.append_data(image)
+
+    print("GIF created successfully!")
+
+
+## CLIENT CODE
 
 UserInterface()
+# PhotoGrid(3,4,"AthleteGrid",640,480)
+# DistanceDiagram()
+# CreateGif("AthleteGrid")
 
